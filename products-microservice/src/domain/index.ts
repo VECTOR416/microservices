@@ -1,0 +1,16 @@
+//* RECURSOS DE PRODUCT
+export * from './entities/Product'
+export * from './dtos/CreateProduct.dto'
+export * from './dtos/UpdateProduct.dto'
+export * from './repositories/ProductRepository'
+export * from './datasources/ProductDatasource'
+
+export * from './use-cases/product/createProduct.use-case'
+export * from './use-cases/product/deleteProduct.use-case'
+export * from './use-cases/product/findAllProducts.use-case'
+export * from './use-cases/product/findProductById.use-case'
+export * from './use-cases/product/getProductStock.use-case'
+export * from './use-cases/product/updateProduct.use-case'
+export * from './use-cases/product/updateProductStock.use-case'
+export * from './use-cases/product/increaseStock.use-case'
+export * from './use-cases/product/reduceStock.use-case'

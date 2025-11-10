@@ -1,0 +1,166 @@
+services:
+  postgres-product-db:
+    image: postgres:15.3-alpine
+    container_name: postgres-product-db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 12345678
+      POSTGRES_DB: Inventory
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_product_db:/var/lib/postgresql/data
+    networks:
+      - backend_network
+
+  postgres-sales-db:
+    image: postgres:15.3-alpine
+    container_name: postgres-sales-db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 12345678
+      POSTGRES_DB: Sales
+    ports:
+      - "5435:5432"
+    volumes:
+      - postgres_sales_db:/var/lib/postgresql/data
+    networks:
+      - backend_network
+  product-microservice-1:
+    build: ./products-microservice
+    container_name: product-microservice-1
+    restart: always
+    expose:
+      - 3000
+    environment:
+      PORT: 3000
+      POSTGRES_URL: "postgresql://postgres:12345678@postgres-product-db:5432/Inventory"
+    ports:
+      - "3000:3000"
+    networks:
+      - backend_network
+    depends_on:
+      postgres-product-db:
+        condition: service_healthy
+
+  product-microservice-2:
+    build: ./products-microservice
+    container_name: product-microservice-2
+    restart: always
+    expose:
+      - 3001
+    environment:
+      PORT: 3001
+      POSTGRES_URL: "postgresql://postgres:12345678@postgres-product-db:5432/Inventory"
+    ports:
+      - "3001:3001"
+    networks:
+      - backend_network
+    depends_on:
+      postgres-product-db:
+        condition: service_healthy
+
+  sales-microservice:
+    build: ./sales-microservice
+    container_name: sales-microservice
+    restart: always
+    expose:
+      - 3002
+    environment:
+      PORT: 3002
+      PRODUCT_MICROSERVICE_URL: "http://nginx:80/api/v1"
+      POSTGRES_URL: "postgresql://postgres:12345678@postgres-sales-db:5432/Sales"
+    ports:
+      - "3002:3002"
+    networks:
+      - backend_network
+    depends_on:
+      postgres-sales-db:
+        condition: service_healthy
+
+  nginx:
+    image: nginx:latest
+    container_name: nginx_load_balancer
+    restart: always
+    ports:
+      - "8080:80"
+    depends_on:
+      - product-microservice-1
+      - product-microservice-2
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - backend_network
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.9.4
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+  
+  kafka-broker:
+    depends_on:
+      - zookeeper
+    image: confluentinc/cp-kafka:7.9.4
+    ports:
+      - "9092:9092"
+    container_name: kafka-broker
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka-broker:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+  
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    depends_on:
+      - kafka-broker
+    ports:
+      - "8082:8080"
+    environment:
+      # Definición del cluster que se mostrará en la interfaz
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka-broker:29092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+      # Opcional: habilitar configuración dinámica
+      DYNAMIC_CONFIG_ENABLED: 'true'
+  
+  init-kafka:
+    depends_on:
+      - kafka-broker
+    image: confluentinc/cp-kafka:7.9.4
+    container_name: init-kafka
+    entrypoint: ["/bin/sh", "-c"]
+    command: |
+      "
+      kafka-topics --bootstrap-server kafka-broker:29092 --list
+      echo -e 'creating kafka topics'
+      kafka-topics --bootstrap-server kafka-broker:29092 --create --if-not-exists --topic products --replication-factor 1 --partitions 3
+      echo -e 'topics created correctly:'
+      kafka-topics --bootstrap-server kafka-broker:29092 --list
+      "
+
+networks:
+  backend_network:
+    driver: bridge
+
+volumes:
+  postgres_product_db:
+  postgres_sales_db:
